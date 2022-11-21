@@ -20,6 +20,7 @@ Map mainPage() {
             input "thermostats", "capability.thermostat", title: "Thermostats to be monitored for mode", multiple: true
             input "fireplaceSwitch", "capability.switch", title: "Fireplace Switch", multiple: false
             input "loggingEnabled", "bool", title: "Enable Logging", required: false, multiple: false, defaultValue: true, submitOnChange: true
+            input "debugLoggingEnabled", "bool", title: "Enable Debug Logging", required: false, multiple: false, defaultValue: false, submitOnChange: true
         }
     }
 }
@@ -70,11 +71,11 @@ void uninstalled() {
 }
 
 void logger(msg, level){
-    if(loggingEnabled){
-        switch(level){
-            case "INFO":
-                log.info("${app.name}: ${msg}")
-                break
+    if(debugLoggingEnabled){
+        log."${level}" "${app.name} ${msg}"
+    } else if(loggingEnabled){
+        if(level == "info"){
+            log."${level}" "${app.name} ${msg}"
         }
     }
 }
