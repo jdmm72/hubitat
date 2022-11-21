@@ -33,16 +33,16 @@ void init() {
     unsubscribe()
     subscribe(thermostats, "thermostatOperatingState", thermostatModeHandler)
     state.anyCooling = false
-    logger("Initialized", "INFO")
+    logger("Initialized", "info")
 }
 
 void switchHandler(evt) {
     if(state.anyCooling && fireplaceSwitch.currentSwitch == "on"){
         fireplaceSwitch.off()
-        logger("Switch Turned Off", "INFO")
+        logger("Switch Turned Off", "info")
     } else if(fireplaceSwitch.currentSwitch == "off"){
         fireplaceSwitch.on()
-        logger("Switch Turned On", "INFO")
+        logger("Switch Turned On", "info")
     }
 }
 
@@ -67,7 +67,7 @@ void updated() {
 void uninstalled() {
     state = null
     unsubscribe()
-    logger("Uninstalled", "INFO")
+    logger("Uninstalled", "info")
 }
 
 void logger(msg, level){
