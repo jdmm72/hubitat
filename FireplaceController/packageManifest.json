@@ -1,0 +1,18 @@
+{
+  "packageName": "FireplaceController",
+  "author": "Jeremy Mynhier",
+  "version": "1.0.0",
+  "minimumHEVersion": "2.1.9",
+  "dateReleased": "2022-11-21",
+  "apps": [
+    {
+      "id": "30451e42-507a-452d-8020-8cded192ae57",
+      "name": "Fireplace Controller",
+      "namespace": "org.mynhier",
+      "location": "https://raw.githubusercontent.com/jdmm72/hubitat/master/FireplaceController/FireplaceController.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": false
+    }
+  ]
+}
