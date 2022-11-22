@@ -1,0 +1,26 @@
+{
+  "author": "Jeremy Mynhier",
+  "gitHubUrl": "https://raw.githubusercontent.com/jdmm72",
+  "packages": [
+    {
+      "id": "e7dab6ae-4afb-4e0b-bee6-98cee1bcde7f",
+      "name": "Fireplace Controller",
+      "category": "Control",
+      "location": "https://raw.githubusercontent.com/jdmm72/hubitat/master/FireplaceController/packageManifest.json",
+      "description": "Controls Fireplace with respect to an cooling state of AC",
+      "tags": [
+        "Climate Control"
+      ]
+    },
+    {
+      "id": "117a7ce7-abef-466e-9203-ffc22abf5cda",
+      "name": "Humidity Controller",
+      "category": "Control",
+      "location": "https://raw.githubusercontent.com/jdmm72/hubitat/master/HumidityController/packageManifest.json",
+      "description": "Controls humidity with respect to an outside temperature",
+      "tags": [
+        "Climate Control"
+      ]
+    }
+  ]
+}
