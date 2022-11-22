@@ -1,0 +1,18 @@
+{
+  "packageName": "HumidityController",
+  "author": "Jeremy Mynhier",
+  "version": "1.0.0",
+  "minimumHEVersion": "2.1.9",
+  "dateReleased": "2022-11-21",
+  "apps": [
+    {
+      "id": "808a7542-9b9d-4e7d-8483-bc661dc42f18",
+      "name": "Humidity Controller",
+      "namespace": "org.mynhier",
+      "location": "https://raw.githubusercontent.com/jdmm72/hubitat/master/HumidityController/HumidityController.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": false
+    }
+  ]
+}
