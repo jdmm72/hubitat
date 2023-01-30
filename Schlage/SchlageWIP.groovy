@@ -39,6 +39,7 @@ metadata {
         capability "Lock"
         capability "Configuration"
         capability "Refresh"
+        capability "Lock Codes"
 
         attribute "alarmMode", "string"        // "unknown", "Off", "Alert", "Tamper", "Kick"
         attribute "alarmSensitivity", "number"    // 0 is unknown, otherwise 1-5 scaled to 1-99
@@ -647,6 +648,103 @@ def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
     result ? [createEvent(map), *result] : createEvent(map)
 }
 
+/**
+ * Responsible for parsing UsersNumberReport command
+ *
+ * @param cmd: The UsersNumberReport command to be parsed
+ *
+ * @return The event(s) to be sent out
+ *
+ */
+def zwaveEvent(UsersNumberReport cmd) {
+    log.trace "[DTH] Executing 'zwaveEvent(UsersNumberReport)' with cmd = $cmd"
+    def result = [createEvent(name: "maxCodes", value: cmd.supportedUsers, displayed: false)]
+    state.codes = cmd.supportedUsers
+    log.debug "${state.checkCode}"
+    if (state.checkCode) {
+        if (state.checkCode <= cmd.supportedUsers) {
+            result << response(requestCode(state.checkCode))
+        } else {
+            state.remove("checkCode")
+            state["checkCode"] = null
+        }
+    }
+    result
+}
+
+/**
+ * Responsible for parsing UserCodeReport command
+ *
+ * @param cmd: The UserCodeReport command to be parsed
+ *
+ * @return The event(s) to be sent out
+ *
+ */
+def zwaveEvent(UserCodeReport cmd) {
+    log.trace "[DTH] Executing 'zwaveEvent(UserCodeReport)' with userIdentifier: ${cmd.userIdentifier} and status: ${cmd.userIdStatus}"
+    def result = []
+    // cmd.userIdentifier seems to be an int primitive type
+    def codeID = cmd.userIdentifier.toString()
+    def lockCodes = loadLockCodes()
+    def map = [ name: "codeChanged", isStateChange: true ]
+    def deviceName = device.displayName
+    def userIdStatus = cmd.userIdStatus
+
+    if (userIdStatus == UserCodeReport.USER_ID_STATUS_OCCUPIED ||
+            (userIdStatus == UserCodeReport.USER_ID_STATUS_STATUS_NOT_AVAILABLE && cmd.userCode)) {
+
+        def codeName = getCodeName(lockCodes, codeID)
+        def changeType = getChangeType(lockCodes, codeID)
+        if (!lockCodes[codeID]) {
+            result << codeSetEvent(lockCodes, codeID, codeName)
+        } else {
+            map.displayed = false
+        }
+        map.value = "$codeID $changeType"
+        map.descriptionText = "${getStatusForDescription(changeType)} \"$codeName\""
+        map.data = [ codeName: codeName, lockName: deviceName ]
+    } else {
+        // We are using userIdStatus here because codeID = 0 is reported when user tries to set programming code as the user code
+        // code is not set
+        if (lockCodes[codeID]) {
+            def codeName = getCodeName(lockCodes, codeID)
+            map.value = "$codeID deleted"
+            map.descriptionText = "Deleted \"$codeName\""
+            map.data = [ codeName: codeName, lockName: deviceName, notify: true, notificationText: "Deleted \"$codeName\" in $deviceName at ${location.name}" ]
+            result << codeDeletedEvent(lockCodes, codeID)
+        } else {
+            map.value = "$codeID unset"
+            map.displayed = false
+            map.data = [ lockName: deviceName ]
+        }
+    }
+
+    clearStateForSlot(codeID)
+    result << createEvent(map)
+
+    if (codeID.toInteger() == state.checkCode) {  // reloadAllCodes() was called, keep requesting the codes in order
+        if (state.checkCode + 1 > state.codes || state.checkCode >= 8) {
+            state.remove("checkCode")  // done
+            state["checkCode"] = null
+            sendEvent(name: "scanCodes", value: "Complete", descriptionText: "Code scan completed", displayed: false)
+        } else {
+            state.checkCode = state.checkCode + 1  // get next
+            result << response(requestCode(state.checkCode))
+        }
+    }
+    if (codeID.toInteger() == state.pollCode) {
+        if (state.pollCode + 1 > state.codes || state.pollCode >= 15) {
+            state.remove("pollCode")  // done
+            state["pollCode"] = null
+        } else {
+            state.pollCode = state.pollCode + 1
+        }
+    }
+
+    result = result.flatten()
+    result
+}
+
 // all the on/off parameters work the same way, so make a common method
 // to deal with them
 //
@@ -773,4 +871,66 @@ def setAlarmSensitivity(newValue) {
         }
     }
     cmds
+}
+
+def getCodes() {
+    log.trace "[DTH] Executing 'reloadAllCodes()' by ${device.displayName}"
+    sendEvent(name: "scanCodes", value: "Scanning", descriptionText: "Code scan in progress", displayed: false)
+    def lockCodes = loadLockCodes()
+    sendEvent(lockCodesEvent(lockCodes))
+    state.checkCode = state.checkCode ?: 1
+
+    def cmds = []
+    // Not calling validateAttributes() here because userNumberGet command will be added twice
+    if (!state.codes) {
+        // BUG: There might be a bug where Schlage does not return the below number of codes
+        cmds << secure(zwave.userCodeV1.usersNumberGet())
+    } else {
+        sendEvent(name: "maxCodes", value: state.codes, displayed: false)
+        cmds << requestCode(state.checkCode)
+    }
+    if(cmds.size() > 1) {
+        cmds = delayBetween(cmds, 4200)
+    }
+    cmds
+}
+
+/**
+ * Reads the 'lockCodes' attribute and parses the same
+ *
+ * @returns Map: The lockCodes map
+ */
+private Map loadLockCodes() {
+    parseJson(device.currentValue("lockCodes") ?: "{}") ?: [:]
+}
+
+/**
+ * Populates the 'lockCodes' attribute by calling create event
+ *
+ * @param lockCodes The user codes in a lock
+ */
+private Map lockCodesEvent(lockCodes) {
+    createEvent(name: "lockCodes", value: (new groovy.json.JsonOutput()).toJson(lockCodes), displayed: false,
+            descriptionText: "'lockCodes' attribute updated")
+}
+
+/**
+ * Returns the command for user code get
+ *
+ * @param codeID: The code slot number
+ *
+ * @return The command for user code get
+ */
+def requestCode(codeID) {
+    secure(zwave.userCodeV1.userCodeGet(userIdentifier: codeID))
+}
+
+/**
+ * Clears the code name and pin from the state basis the code slot number
+ *
+ * @param codeID: The code slot number
+ */
+def clearStateForSlot(codeID) {
+    state.remove("setname$codeID")
+    state["setname$codeID"] = null
 }
