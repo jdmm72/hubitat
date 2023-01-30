@@ -38,6 +38,13 @@ metadata {
     definition (name: "Schlage BE469NX", namespace: "org.mynhier", author: "Jeremy Mynhier") {
         capability "Lock"
         capability "Configuration"
+
+        attribute "alarmMode", "string"        // "unknown", "Off", "Alert", "Tamper", "Kick"
+        attribute "alarmSensitivity", "number"    // 0 is unknown, otherwise 1-5 scaled to 1-99
+
+        command "setAlarmMode", [[name:"Alarm Mode", type: "ENUM", description: "", constraints: ["Off", "Alert", "Tamper", "Kick"]]]
+        command "setAlarmSensitivity", [[name:"Alarm Sensitivity", type: "ENUM", description: "", constraints: [1,2,3,4,5]]]
+        //command "setIndicatorBehavior", [[name:"LED Indicator Behavior", type: "ENUM", description: "", constraints: ["LED ON When Switch OFF", "LED ON When Switch ON", "LED Always OFF", "LED Always ON", "0", "1", "2", "3"] ] ]
     }
 
     preferences{
@@ -305,4 +312,421 @@ def zwaveEvent(hubitat.zwave.commands.associationv2.AssociationReport cmd) {
         result << response(zwave.associationV1.associationSet(groupingIdentifier: 2, nodeId: zwaveHubNodeId))
     }
     result
+}
+
+def zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) {
+    def result = []
+    def map = null        // use this for config reports that are handled
+
+    // use desc/val for generic handling of config reports (it will just send a descriptionText for the acitivty stream)
+    def desc = null
+    def val = ""
+
+    switch (cmd.parameterNumber) {
+        case 0x3:
+            map = parseBinaryConfigRpt('beeperMode', cmd.configurationValue[0], 'Beeper Mode')
+            break
+
+            // done:  vacation mode toggle
+        case 0x4:
+            map = parseBinaryConfigRpt('vacationMode', cmd.configurationValue[0], 'Vacation Mode')
+            break
+
+            // done: lock and leave mode
+        case 0x5:
+            map = parseBinaryConfigRpt('lockLeave', cmd.configurationValue[0], 'Lock & Leave')
+            break
+
+            // these don't seem to be useful.  It's just a bitmap of the code slots used.
+        case 0x6:
+            desc = "User Slot Bit Fields"
+            val = "${cmd.configurationValue[3]} ${cmd.configurationValue[2]} ${cmd.configurationValue[1]} ${cmd.configurationValue[0]}"
+            break
+
+            // done:  the alarm mode of the lock.
+        case 0x7:
+            map = [name: "alarmMode", displayed: true]
+            // when getting the alarm mode, also query the sensitivity for that current alarm mode
+            switch (cmd.configurationValue[0]) {
+                case 0x00:
+                    map.value = "Off_alarmMode"
+                    break
+                case 0x01:
+                    map.value = "Alert_alarmMode"
+                    result << response(secure(zwave.configurationV2.configurationGet(parameterNumber: 0x08)))
+                    break
+                case 0x02:
+                    map.value = "Tamper_alarmMode"
+                    result << response(secure(zwave.configurationV2.configurationGet(parameterNumber: 0x09)))
+                    break
+                case 0x03:
+                    map.value = "Kick_alarmMode"
+                    result << response(secure(zwave.configurationV2.configurationGet(parameterNumber: 0x0A)))
+                    break
+                default:
+                    map.value = "unknown_alarmMode"
+            }
+            map.descriptionText = "$device.displayName Alarm Mode set to \"$map.value\""
+            break
+
+            // done: alarm sensitivities - one for each mode
+        case 0x8:
+        case 0x9:
+        case 0xA:
+            def whichMode = null
+            switch (cmd.parameterNumber) {
+                case 0x8:
+                    whichMode = "Alert"
+                    break;
+                case 0x9:
+                    whichMode = "Tamper"
+                    break;
+                case 0xA:
+                    whichMode = "Kick"
+                    break;
+            }
+            def curAlarmMode = device.currentValue("alarmMode")
+            val = "${cmd.configurationValue[0]}"
+
+            // the lock has sensitivity values between 1 and 5. We set the slider's range ("1".."5") in the Tile's Definition
+            def modifiedValue = cmd.configurationValue[0]
+
+            map = [descriptionText: "$device.displayName Alarm $whichMode Sensitivity set to $val", displayed: true]
+
+            if (curAlarmMode == "${whichMode}_alarmMode") {
+                map.name = "alarmSensitivity"
+                map.value = modifiedValue
+            } else {
+                log.debug "got sensitivity for $whichMode while in $curAlarmMode"
+                map.isStateChange = true
+            }
+
+            break
+
+        case 0xB:
+            map = parseBinaryConfigRpt('localControl', cmd.configurationValue[0], 'Local Alarm Control')
+            break
+
+            // how many times has the electric motor locked or unlock the device?
+        case 0xC:
+            desc = "Electronic Transition Count"
+            def ttl = cmd.configurationValue[3] + (cmd.configurationValue[2] * 0x100) + (cmd.configurationValue[1] * 0x10000) + (cmd.configurationValue[0] * 0x1000000)
+            val = "$ttl"
+            break
+
+            // how many times has the device been locked or unlocked manually?
+        case 0xD:
+            desc = "Mechanical Transition Count"
+            def ttl = cmd.configurationValue[3] + (cmd.configurationValue[2] * 0x100) + (cmd.configurationValue[1] * 0x10000) + (cmd.configurationValue[0] * 0x1000000)
+            val = "$ttl"
+            break
+
+            // how many times has there been a failure by the electric motor?  (due to jamming??)
+        case 0xE:
+            desc = "Electronic Failed Count"
+            def ttl = cmd.configurationValue[3] + (cmd.configurationValue[2] * 0x100) + (cmd.configurationValue[1] * 0x10000) + (cmd.configurationValue[0] * 0x1000000)
+            val = "$ttl"
+            break
+
+            // done: auto lock mode
+        case 0xF:
+            map = parseBinaryConfigRpt('autoLock', cmd.configurationValue[0], 'Auto Lock')
+            break
+
+            // this will be useful as an attribute/command usable by a smartapp
+        case 0x10:
+            map = [name: 'pinLength', value: cmd.configurationValue[0], displayed: true, descriptionText: "$device.displayName PIN length configured to ${cmd.configurationValue[0]} digits"]
+            break
+
+            // not sure what this one stores
+        case 0x11:
+            desc = "Electronic High Preload Transition Count"
+            def ttl = cmd.configurationValue[3] + (cmd.configurationValue[2] * 0x100) + (cmd.configurationValue[1] * 0x10000) + (cmd.configurationValue[0] * 0x1000000)
+            val = "$ttl"
+            break
+
+            // ???
+        case 0x12:
+            desc = "Bootloader Version"
+            val = "${cmd.configurationValue[0]}"
+            break
+        default:
+            desc = "Unknown parameter ${cmd.parameterNumber}"
+            val = "${cmd.configurationValue[0]}"
+            break
+    }
+    if (map) {
+        result << createEvent(map)
+    } else if (desc != null) {
+        // generic description text
+        result << createEvent([descriptionText: "$device.displayName reports \"$desc\" configured as \"$val\"", displayed: true, isStateChange: true])
+    }
+    result
+}
+
+def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
+    def result = []
+    def map = null
+    if (cmd.zwaveAlarmType == 6) // ZWAVE_ALARM_TYPE_ACCESS_CONTROL
+    {
+        if (1 <= cmd.zwaveAlarmEvent && cmd.zwaveAlarmEvent < 10) {
+            map = [name: "lock", value: (cmd.zwaveAlarmEvent & 1) ? "locked" : "unlocked"]
+        }
+        switch (cmd.zwaveAlarmEvent) {
+            case 1:
+                map.descriptionText = "$device.displayName was manually locked"
+                map.data = [usedCode: "manual"]
+                break
+            case 2:
+                map.descriptionText = "$device.displayName was manually unlocked"
+                map.data = [usedCode: "manual"]
+                break
+            case 5:
+                if (cmd.eventParameter) {
+                    map.descriptionText = "$device.displayName was locked with code ${cmd.eventParameter.first()}"
+                    map.data = [usedCode: cmd.eventParameter[0]]
+                } else {
+                    map.descriptionText = "$device.displayName was locked with keypad"
+                    map.data = [usedCode: -1]
+                }
+                break
+            case 6:
+                if (cmd.eventParameter) {
+                    map.descriptionText = "$device.displayName was unlocked with code ${cmd.eventParameter.first()}"
+                    map.data = [usedCode: cmd.eventParameter[0]]
+                } else {
+                    map.descriptionText = "$device.displayName was unlocked with keypad"
+                    map.data = [usedCode: -1]
+                }
+                break
+            case 9:
+                map.descriptionText = "$device.displayName was autolocked"
+                map.data = [usedCode: "auto"]
+                break
+            case 7:
+            case 8:
+            case 0xA:
+                map = [name: "lock", value: "unknown", descriptionText: "$device.displayName was not locked fully"]
+                break
+            case 0xB:
+                map = [name: "lock", value: "unknown", descriptionText: "$device.displayName is jammed", eventType: "ALERT", displayed: true]
+                break
+            case 0xC:
+                map = [name: "codeChanged", value: "all", descriptionText: "$device.displayName: all user codes deleted", displayed: true, isStateChange: true]
+                allCodesDeleted()
+                break
+            case 0xD:
+                if (cmd.eventParameter) {
+                    map = [name: "codeReport", value: cmd.eventParameter[0], data: [code: ""], isStateChange: true]
+                    map.descriptionText = "$device.displayName code ${map.value} was deleted"
+                    map.isStateChange = (state["code$map.value"] != "")
+                    state["code$map.value"] = ""
+                } else {
+                    map = [name: "codeChanged", descriptionText: "$device.displayName: user code deleted", isStateChange: true]
+                }
+                break
+            case 0xE:
+                map = [name: "codeChanged", value: cmd.alarmLevel, descriptionText: "$device.displayName: user code added", isStateChange: true]
+                if (cmd.eventParameter) {
+                    map.value = cmd.eventParameter[0]
+                    result << response(requestCode(cmd.eventParameter[0]))
+                }
+                break
+            case 0xF:
+                map = [name: "tamper", value: "detected", descriptionText: "$device.displayName: Too many user code failures.", eventType: "ALERT", displayed: true, isStateChange: true]
+                break
+                // map = [ name: "codeChanged", descriptionText: "$device.displayName: user code not added, duplicate", isStateChange: true ]
+                // break
+            case 0x10:
+                map = [name: "tamper", value: "detected", descriptionText: "$device.displayName: keypad temporarily disabled", displayed: true]
+                break
+            case 0x11:
+                map = [descriptionText: "$device.displayName: keypad is busy"]
+                break
+            case 0x12:
+                map = [name: "codeChanged", descriptionText: "$device.displayName: program code changed", isStateChange: true]
+                break
+            case 0x13:
+                map = [name: "tamper", value: "detected", descriptionText: "$device.displayName: code entry attempt limit exceeded", displayed: true]
+                break
+            default:
+                map = map ?: [descriptionText: "$device.displayName: alarm event $cmd.zwaveAlarmEvent", displayed: false]
+                break
+        }
+    } else if (cmd.zwaveAlarmType == 7) // ZWAVE_ALARM_TYPE_BURGLAR
+    {
+        map = [name: "tamper", value: "detected", displayed: true, isStateChange: true]
+        switch (cmd.zwaveAlarmEvent) {
+            case 0:
+                map.value = "clear"
+                map.descriptionText = "$device.displayName: tamper alert cleared"
+                break
+            case 1:
+            case 2:
+                map.descriptionText = "$device.displayName: intrusion attempt detected"
+                break
+            case 3:
+                map.descriptionText = "$device.displayName: covering removed"
+                break
+            case 4:
+                map.descriptionText = "$device.displayName: invalid code"
+                break
+            default:
+                map.descriptionText = "$device.displayName: tamper alarm $cmd.zwaveAlarmEvent"
+                break
+        }
+    } else switch (cmd.alarmType) {
+            case 9:
+            case 17:
+            case 23:
+            case 26:
+                map = [name: "lock", value: "unknown", descriptionText: "$device.displayName bolt is jammed"]
+                break
+            case 13:
+                map = [name: "codeChanged", value: cmd.alarmLevel, descriptionText: "$device.displayName code $cmd.alarmLevel was added", isStateChange: true]
+                result << response(requestCode(cmd.alarmLevel))
+                break
+            case 32:
+                map = [name: "codeChanged", value: "all", descriptionText: "$device.displayName: all user codes deleted", isStateChange: true]
+                allCodesDeleted()
+            case 33:
+                map = [name: "codeReport", value: cmd.alarmLevel, data: [code: ""], isStateChange: true]
+                map.descriptionText = "$device.displayName code $cmd.alarmLevel was deleted"
+                map.isStateChange = (state["code$cmd.alarmLevel"] != "")
+                state["code$cmd.alarmLevel"] = ""
+                break
+            case 112:
+                map = [name: "codeChanged", value: cmd.alarmLevel, descriptionText: "$device.displayName code $cmd.alarmLevel changed", isStateChange: true]
+                result << response(requestCode(cmd.alarmLevel))
+                break
+            case 130:  // Yale YRD batteries replaced
+                map = [descriptionText: "$device.displayName batteries replaced", isStateChange: true]
+                break
+            case 131:
+                map = [ /*name: "codeChanged", value: cmd.alarmLevel,*/ descriptionText: "$device.displayName code $cmd.alarmLevel is duplicate", isStateChange: false]
+                break
+            case 161:
+                if (cmd.alarmLevel == 2) {
+                    map = [descriptionText: "$device.displayName front escutcheon removed", isStateChange: true]
+                } else {
+                    map = [descriptionText: "$device.displayName detected failed user code attempt", isStateChange: true]
+                }
+                break
+            case 167:
+                if (!state.lastbatt || (new Date().time) - state.lastbatt > 12 * 60 * 60 * 1000) {
+                    map = [descriptionText: "$device.displayName: battery low", isStateChange: true]
+                    result << response(secure(zwave.batteryV1.batteryGet()))
+                } else {
+                    map = [name: "battery", value: device.currentValue("battery"), descriptionText: "$device.displayName: battery low", displayed: true]
+                }
+                break
+            case 168:
+                map = [name: "battery", value: 1, descriptionText: "$device.displayName: battery level critical", displayed: true]
+                break
+            case 169:
+                map = [name: "battery", value: 0, descriptionText: "$device.displayName: battery too low to operate lock", isStateChange: true]
+                break
+            default:
+                map = [displayed: false, descriptionText: "$device.displayName: alarm event $cmd.alarmType level $cmd.alarmLevel"]
+                break
+        }
+    result ? [createEvent(map), *result] : createEvent(map)
+}
+
+def setAlarmMode(def newValue = null) {
+
+    def cs = device.currentValue("alarmMode")
+    def newMode = 0x0
+
+    def cmds = null
+
+    if (newValue == null) {
+        switch (cs) {
+            case "Off_alarmMode":
+                newMode = 0x1
+                break
+            case "Alert_alarmMode":
+                newMode = 0x2
+                break
+            case "Tamper_alarmMode":
+                newMode = 0x3
+                break
+            case "Kick_alarmMode":
+                newMode = 0x0
+                break
+            case "unknown_alarmMode":
+            default:
+                // don't send a mode - instead request the current state
+                cmds = secureSequence([zwave.configurationV2.configurationGet(parameterNumber: 0x7)], 5000)
+
+        }
+    } else {
+        switch (newValue) {
+            case "Off":
+                newMode = 0x0
+                break
+            case "Alert":
+                newMode = 0x1
+                break
+            case "Tamper":
+                newMode = 0x2
+                break
+            case "Kick":
+                newMode = 0x3
+                break
+            default:
+                // don't send a mode - instead request the current state
+                cmds = secureSequence([zwave.configurationV2.configurationGet(parameterNumber: 0x7)], 5000)
+
+        }
+    }
+    if (cmds == null) {
+        // change the alarmSensitivity to the 'unknown' value - it will get refreshed after the alarm mode is done changing
+        sendEvent(name: 'alarmSensitivity', value: 0, displayed: false)
+        cmds = secureSequence([zwave.configurationV2.configurationSet(parameterNumber: 7, size: 1, configurationValue: [newMode])], 5000)
+    }
+
+    log.debug "setAlarmMode sending ${cmds.inspect()}"
+    cmds
+}
+
+def setAlarmSensitivity(newValue) {
+    def cmds = null
+    if (newValue != null) {
+        // newvalue will be between 1 and 5 inclusive as controlled by the slider's range definition
+        newValue = newValue.toInteger();
+
+        // there are three possible values to set.	which one depends on the current alarmMode
+        def cs = device.currentValue("alarmMode")
+
+        def paramToSet = 0
+
+        switch (cs) {
+            case "Off_alarmMode":
+                // do nothing.	the slider should be disabled anyway
+                break
+            case "Alert_alarmMode":
+                // set param 8
+                paramToSet = 0x8
+                break
+            case "Tamper_alarmMode":
+                paramToSet = 0x9
+                break
+            case "Kick_alarmMode":
+                paramToSet = 0xA
+                break
+            case "unknown_alarmMode":
+            default:
+                sendEvent(descriptionText: "$device.displayName unable to set alarm sensitivity while alarm mode in unknown state", displayed: true, isStateChange: true)
+                break
+        }
+        if (paramToSet != 0) {
+            // first set the attribute to 0 for UI purposes
+            sendEvent(name: 'alarmSensitivity', value: 0, displayed: false)
+            // then add the actual attribute set call
+            cmds = secureSequence([zwave.configurationV2.configurationSet(parameterNumber: paramToSet, size: 1, configurationValue: [newValue])], 5000)
+            log.debug "setAlarmSensitivity sending ${cmds.inspect()}"
+        }
+    }
+    cmds
 }
