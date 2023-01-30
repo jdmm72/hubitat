@@ -38,12 +38,15 @@ metadata {
     definition (name: "Schlage BE469NX", namespace: "org.mynhier", author: "Jeremy Mynhier") {
         capability "Lock"
         capability "Configuration"
+        capability "Refresh"
 
         attribute "alarmMode", "string"        // "unknown", "Off", "Alert", "Tamper", "Kick"
         attribute "alarmSensitivity", "number"    // 0 is unknown, otherwise 1-5 scaled to 1-99
+        attribute "beeperMode", "string"
 
         command "setAlarmMode", [[name:"Alarm Mode", type: "ENUM", description: "", constraints: ["Off", "Alert", "Tamper", "Kick"]]]
         command "setAlarmSensitivity", [[name:"Alarm Sensitivity", type: "ENUM", description: "", constraints: [1,2,3,4,5]]]
+        command "setBeeperMode"
     }
 
     preferences{
@@ -463,6 +466,18 @@ def zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) {
     result
 }
 
+def parseBinaryConfigRpt(paramName, paramValue, paramDesc) {
+    def map = [name: paramName, displayed: true]
+
+    def newVal = "on"
+    if (paramValue == 0) {
+        newVal = "off"
+    }
+    map.value = "${newVal}_${paramName}"
+    map.descriptionText = "$device.displayName $paramDesc has been turned $newVal"
+    return map
+}
+
 def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
     def result = []
     def map = null
@@ -630,6 +645,36 @@ def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
                 break
         }
     result ? [createEvent(map), *result] : createEvent(map)
+}
+
+// all the on/off parameters work the same way, so make a common method
+// to deal with them
+//
+def setOnOffParameter(paramName, paramNumber) {
+    def cmds = null
+    def cs = device.currentValue(paramName)
+
+    // change parameter to the 'unknown' value - it will get refreshed after it is done changing
+    sendEvent(name: paramName, value: "unknown_${paramName}", displayed: false)
+
+    if (cs == "on_${paramName}") {
+        // turn it off
+        cmds = secureSequence([zwave.configurationV2.configurationSet(parameterNumber: paramNumber, size: 1, configurationValue: [0])], 5000)
+    } else if (cs == "off_${paramName}") {
+        // turn it on
+        cmds = secureSequence([zwave.configurationV2.configurationSet(parameterNumber: paramNumber, size: 1, configurationValue: [0xFF])], 5000)
+    } else {
+        // it's in an unknown state, so just query it
+        cmds = secureSequence([zwave.configurationV2.configurationGet(parameterNumber: paramNumber)], 5000)
+    }
+
+    log.debug "set $paramName sending ${cmds.inspect()}"
+
+    cmds
+}
+
+def setBeeperMode() {
+    setOnOffParameter("beeperMode", 0x3)
 }
 
 def setAlarmMode(def newValue = null) {
