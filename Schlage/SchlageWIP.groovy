@@ -81,8 +81,6 @@ def configure() {
     cmds = delayBetween(cmds, THIRTY_SECONDS_IN_MILLIS)
     String descriptionText = "${device.displayName} was configured"
     if (txtEnable) log.info "${descriptionText}"
-    sendEvent(name: "lockCodes", value: "{}")
-    state=[:]
     cmds
 }
 
@@ -653,13 +651,12 @@ def zwaveEvent(UserCodeReport cmd) {
             map.descriptionText = "$device.displayName code $cmd.userIdentifier is set"
             map.displayed = (cmd.userIdentifier != state.requestCode && cmd.userIdentifier != state.pollCode)
             map.isStateChange = true
-            updateLockCodes(state.lockCodes)
+            updateLockCodes(getLockCodes())
         }
         result << createEvent(map)
     } else {
         map = [name: "codeReport", value: cmd.userIdentifier, data: [code: ""]]
         if (state.blankcodes && state["reset$name"]) {
-            state.remove("blankcodes")
             // we deleted this code so we can tell that our new code gets set
             map.descriptionText = "$device.displayName code $cmd.userIdentifier was reset"
             map.displayed = map.isStateChange = false
@@ -701,6 +698,8 @@ def zwaveEvent(UserCodeReport cmd) {
         }
     }
     log.debug "code report parsed to ${result.inspect()}"
+    state.remove("blankcodes")
+    state.remove("requestedChange")
     result
 }
 
@@ -858,13 +857,9 @@ def setCodeLength(newValue) {
 }
 
 def getCodes() {
-    state.findAll { it.key.startsWith 'code' }.collectEntries {
-        [it.key, (it.value instanceof String && it.value.startsWith("~")) ? decrypt(it.value) : it.value]
-    }
-}
-
-def getCode(codeNumber) {
-    decrypt(state["code$codeNumber"])
+    Map codeMap = getLockCodes()
+    log.debug "codeMap: $codeMap"
+    codeMap
 }
 
 def setCode(codeNumber, code, name) {
@@ -891,11 +886,9 @@ def setCode(codeNumber, code, name) {
     } else {
         codeMap = ["name":"${name}", "code":"${code}"]
         data = ["${codeNumber}":codeMap]
-        log.debug "data: $data"
         lockCodes << data
-        state.codeChanged = "added"
     }
-    state.lockCodes=lockCodes
+    sendEvent(name:"lockCodes", value:JsonOutput.toJson(lockCodes), isStateChange:true)
     secureSequence([
             zwave.userCodeV1.userCodeSet(userIdentifier: codeNumber, userIdStatus: 1, userCode: code),
             zwave.userCodeV1.userCodeGet(userIdentifier: codeNumber)
@@ -907,7 +900,6 @@ void updateLockCodes(lockCodes){
 	whenever a code changes we update the lockCodes event
 	*/
     String strCodes = JsonOutput.toJson(lockCodes)
-    log.debug "strCodes: $strCodes"
     if (optEncrypt) {
         strCodes = encrypt(strCodes)
     }
@@ -925,7 +917,6 @@ Map getLockCodes() {
         if (lockCodes[0] == "{") result = new JsonSlurper().parseText(lockCodes)
         else result = new JsonSlurper().parseText(decrypt(lockCodes))
     }
-    state.test=result
     return result
 }
 
