@@ -793,20 +793,20 @@ def setAlarmSensitivity(newValue) {
         def paramToSet = 0
 
         switch (cs) {
-            case "Off_alarmMode":
+            case "Off":
                 // do nothing.	the slider should be disabled anyway
                 break
-            case "Alert_alarmMode":
+            case "Alert":
                 // set param 8
                 paramToSet = 0x8
                 break
-            case "Tamper_alarmMode":
+            case "Tamper":
                 paramToSet = 0x9
                 break
-            case "Kick_alarmMode":
+            case "Kick":
                 paramToSet = 0xA
                 break
-            case "unknown_alarmMode":
+            case "unknown":
             default:
                 sendEvent(descriptionText: "$device.displayName unable to set alarm sensitivity while alarm mode in unknown state", displayed: true, isStateChange: true)
                 break
