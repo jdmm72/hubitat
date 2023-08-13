@@ -41,7 +41,7 @@ import hubitat.zwave.commands.usercodev1.*
 import groovy.transform.Field
 
 metadata {
-    definition (name: "Schlage BE469NX", namespace: "org.mynhier", author: "Jeremy Mynhier") {
+    definition(name: "Schlage BE469NX", namespace: "org.mynhier", author: "Jeremy Mynhier") {
         capability "Lock"
         capability "Configuration"
         capability "Refresh"
@@ -50,13 +50,14 @@ metadata {
         attribute "alarmMode", "string"        // "unknown", "Off", "Alert", "Tamper", "Kick"
         attribute "alarmSensitivity", "number"    // 0 is unknown, otherwise 1-5 scaled to 1-99
         attribute "beeperMode", "string"
+        attribute "batteryLevel", "number"
 
-        command "setAlarmMode", [[name:"Alarm Mode", type: "ENUM", description: "", constraints: ["Off", "Alert", "Tamper", "Kick"]]]
-        command "setAlarmSensitivity", [[name:"Alarm Sensitivity", type: "ENUM", description: "", constraints: [1,2,3,4,5]]]
+        command "setAlarmMode", [[name: "Alarm Mode", type: "ENUM", description: "", constraints: ["Off", "Alert", "Tamper", "Kick"]]]
+        command "setAlarmSensitivity", [[name: "Alarm Sensitivity", type: "ENUM", description: "", constraints: [1, 2, 3, 4, 5]]]
         command "setBeeperMode"
     }
 
-    preferences{
+    preferences {
         input name: "optEncrypt", type: "bool", title: "Enable lockCode encryption", defaultValue: false, description: ""
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false, description: ""
         input name: "txtEnable", type: "bool", title: "Enable descriptionText logging", defaultValue: true, description: ""
@@ -105,7 +106,7 @@ void updated() {
     //check crnt lockCodes for encryption status
     updateEncryption()
     //turn off debug logs after 30 minutes
-    if (logEnable) runIn(ONE_HALF_HOUR_IN_SECONDS,logsOff)
+    if (logEnable) runIn(ONE_HALF_HOUR_IN_SECONDS, logsOff)
 }
 
 /**
@@ -119,7 +120,7 @@ void updated() {
 def parse(String description) {
     def result = null
     if (description.startsWith("Err")) {
-            result = createEvent(descriptionText: description, isStateChange: true, displayed: false)
+        result = createEvent(descriptionText: description, isStateChange: true, displayed: false)
     } else {
         def cmd = zwave.parse(description, [0x98: 1, 0x62: 1, 0x63: 1, 0x71: 2, 0x72: 2, 0x80: 1, 0x85: 2, 0x86: 1])
         if (cmd) {
@@ -151,7 +152,7 @@ def refresh() {
     cmds
 }
 
-def lock(){
+def lock() {
     String descriptionText = "${device.displayName} was locked"
     if (txtEnable) log.info "${descriptionText}"
     lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_SECURED)
@@ -267,6 +268,7 @@ def zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) {
         map.descriptionText = "Has a low battery"
     } else {
         map.value = cmd.batteryLevel
+        batteryLevel = cmd.batteryLevel
         map.descriptionText = "Battery is at ${cmd.batteryLevel}%"
     }
     createEvent(map)
@@ -700,6 +702,7 @@ def zwaveEvent(UserCodeReport cmd) {
     log.debug "code report parsed to ${result.inspect()}"
     state.remove("blankcodes")
     state.remove("requestedChange")
+    state.remove("codeChanged")
     result
 }
 
@@ -870,32 +873,32 @@ def setCode(codeNumber, code, name) {
     if (!name) name = "code #${codeNumber}"
 
     lockCodes = getLockCodes()
-    Map codeMap = getCodeMap(lockCodes,codeNumber)
-    if (!changeIsValid(lockCodes,codeMap,codeNumber,code,name)) return
+    Map codeMap = getCodeMap(lockCodes, codeNumber)
+    if (!changeIsValid(lockCodes, codeMap, codeNumber, code, name)) return
 
     Map data = [:]
     String value
 
     if (codeMap) {
         if (codeMap.name != name || codeMap.code != code) {
-            codeMap = ["name":"${name}", "code":"${code}"]
+            codeMap = ["name": "${name}", "code": "${code}"]
             lockCodes."${codeNumber}" = codeMap
-            data = ["${codeNumber}":codeMap]
+            data = ["${codeNumber}": codeMap]
             value = "changed"
         }
     } else {
-        codeMap = ["name":"${name}", "code":"${code}"]
-        data = ["${codeNumber}":codeMap]
+        codeMap = ["name": "${name}", "code": "${code}"]
+        data = ["${codeNumber}": codeMap]
         lockCodes << data
     }
-    sendEvent(name:"lockCodes", value:JsonOutput.toJson(lockCodes), isStateChange:true)
+    sendEvent(name: "lockCodes", value: JsonOutput.toJson(lockCodes), isStateChange: true)
     secureSequence([
             zwave.userCodeV1.userCodeSet(userIdentifier: codeNumber, userIdStatus: 1, userCode: code),
             zwave.userCodeV1.userCodeGet(userIdentifier: codeNumber)
     ], 7000)
 }
 
-void updateLockCodes(lockCodes){
+void updateLockCodes(lockCodes) {
     /*
 	whenever a code changes we update the lockCodes event
 	*/
@@ -903,7 +906,7 @@ void updateLockCodes(lockCodes){
     if (optEncrypt) {
         strCodes = encrypt(strCodes)
     }
-    sendEvent(name:"lockCodes", value:strCodes, isStateChange:true)
+    sendEvent(name: "lockCodes", value: strCodes, isStateChange: true)
 }
 
 Map getLockCodes() {
@@ -920,16 +923,16 @@ Map getLockCodes() {
     return result
 }
 
-Map getCodeMap(lockCodes,codeNumber){
+Map getCodeMap(lockCodes, codeNumber) {
     Map codeMap = [:]
     Map lockCode = lockCodes?."${codeNumber}"
     if (lockCode) {
-        codeMap = ["name":"${lockCode.name}", "code":"${lockCode.code}"]
+        codeMap = ["name": "${lockCode.name}", "code": "${lockCode.code}"]
     }
     return codeMap
 }
 
-Boolean changeIsValid(lockCodes,codeMap,codeNumber,code,name){
+Boolean changeIsValid(lockCodes, codeMap, codeNumber, code, name) {
     //validate proposed lockCode change
     Boolean result = true
     Integer maxCodeLength = device.currentValue("codeLength")?.toInteger() ?: 4
@@ -937,23 +940,31 @@ Boolean changeIsValid(lockCodes,codeMap,codeNumber,code,name){
     Boolean isBadLength = code.size() > maxCodeLength
     Boolean isBadCodeNum = maxCodes < codeNumber
     if (lockCodes) {
-        List nameSet = lockCodes.collect{ it.value.name }
-        List codeSet = lockCodes.collect{ it.value.code }
+        List nameSet = lockCodes.collect { it.value.name }
+        List codeSet = lockCodes.collect { it.value.code }
         if (codeMap) {
-            nameSet = nameSet.findAll{ it != codeMap.name }
-            codeSet = codeSet.findAll{ it != codeMap.code }
+            nameSet = nameSet.findAll { it != codeMap.name }
+            codeSet = codeSet.findAll { it != codeMap.code }
         }
         Boolean nameInUse = name in nameSet
         Boolean codeInUse = code in codeSet
         if (nameInUse || codeInUse) {
-            if (nameInUse) { log.warn "changeIsValid:false, name:${name} is in use:${ lockCodes.find{ it.value.name == "${name}" } }" }
-            if (codeInUse) { log.warn "changeIsValid:false, code:${code} is in use:${ lockCodes.find{ it.value.code == "${code}" } }" }
+            if (nameInUse) {
+                log.warn "changeIsValid:false, name:${name} is in use:${lockCodes.find { it.value.name == "${name}" }}"
+            }
+            if (codeInUse) {
+                log.warn "changeIsValid:false, code:${code} is in use:${lockCodes.find { it.value.code == "${code}" }}"
+            }
             result = false
         }
     }
     if (isBadLength || isBadCodeNum) {
-        if (isBadLength) { log.warn "changeIsValid:false, length of code ${code} does not match codeLength of ${maxCodeLength}" }
-        if (isBadCodeNum) { log.warn "changeIsValid:false, codeNumber ${codeNumber} is larger than maxCodes of ${maxCodes}" }
+        if (isBadLength) {
+            log.warn "changeIsValid:false, length of code ${code} does not match codeLength of ${maxCodeLength}"
+        }
+        if (isBadCodeNum) {
+            log.warn "changeIsValid:false, codeNumber ${codeNumber} is larger than maxCodes of ${maxCodes}"
+        }
         result = false
     }
     return result
@@ -961,7 +972,7 @@ Boolean changeIsValid(lockCodes,codeMap,codeNumber,code,name){
 
 def deleteCode(codeNumber) {
     log.debug "deleting code $codeNumber"
-    Map codeMap = getCodeMap(lockCodes,"${codeNumber}")
+    Map codeMap = getCodeMap(lockCodes, "${codeNumber}")
     if (codeMap) {
         Map result = [:]
         //build new lockCode map, exclude deleted code
@@ -970,7 +981,7 @@ def deleteCode(codeNumber) {
                 result << it
             }
         }
-        state.requestedChange=result
+        state.requestedChange = result
     }
     secureSequence([
             zwave.userCodeV1.userCodeSet(userIdentifier: codeNumber, userIdStatus: 0),
@@ -978,21 +989,21 @@ def deleteCode(codeNumber) {
     ], 7000)
 }
 
-void logsOff(){
+void logsOff() {
     log.warn "debug logging disabled..."
-    device.updateSetting("logEnable",[value:"false",type:"bool"])
+    device.updateSetting("logEnable", [value: "false", type: "bool"])
 }
 
-void updateEncryption(){
+void updateEncryption() {
     /*
 	resend lockCodes map when the encryption option is changed
 	*/
     String lockCodes = device.currentValue("lockCodes") //encrypted or decrypted
-    if (lockCodes){
-        if (optEncrypt && lockCodes[0] == "{") {	//resend encrypted
-            sendEvent(name:"lockCodes",value: encrypt(lockCodes))
-        } else if (!optEncrypt && lockCodes[0] != "{") {	//resend decrypted
-            sendEvent(name:"lockCodes",value: decrypt(lockCodes))
+    if (lockCodes) {
+        if (optEncrypt && lockCodes[0] == "{") {    //resend encrypted
+            sendEvent(name: "lockCodes", value: encrypt(lockCodes))
+        } else if (!optEncrypt && lockCodes[0] != "{") {    //resend decrypted
+            sendEvent(name: "lockCodes", value: decrypt(lockCodes))
         }
     }
 }
