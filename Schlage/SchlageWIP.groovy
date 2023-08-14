@@ -655,6 +655,8 @@ def zwaveEvent(UserCodeReport cmd) {
             updateLockCodes(getLockCodes())
         }
         result << createEvent(map)
+        state.remove("name".toString())
+        code = ""
     } else {
         map = [name: "codeReport", value: cmd.userIdentifier, data: [code: ""]]
         if (blankCodes && state["reset$name"]) {
@@ -666,12 +668,12 @@ def zwaveEvent(UserCodeReport cmd) {
             result << response(setCode(cmd.userIdentifier, state["reset$name"]))
             state.remove("reset$name".toString())
         } else {
-            if (state[name]) {
+            if (getCodeMap(lockCodes, cmd.userIdentifier).size() > 0) {
                 updateLockCodes(state.requestedChange)
                 state.requestedChange = null
                 Map data = ["${codeNumber}": codeMap]
                 map.descriptionText = "$device.displayName code $cmd.userIdentifier was deleted"
-
+                state.remove("$name".toString())
             } else {
                 map.descriptionText = "$device.displayName code $cmd.userIdentifier is not set"
             }
@@ -681,7 +683,11 @@ def zwaveEvent(UserCodeReport cmd) {
         }
         code = ""
     }
-    state[name] = code ? encrypt(code) : code
+    if(code != null && code.toString() != "") {
+        state[name] = code ? encrypt(code) : code
+    } else {
+        state.remove("name".toString())
+    }
 
     if (cmd.userIdentifier == state.requestCode) {  // reloadCodes() was called, keep requesting the codes in order
         if (state.requestCode + 1 > state.codes || state.requestCode >= 30) {
@@ -701,7 +707,6 @@ def zwaveEvent(UserCodeReport cmd) {
     log.debug "code report parsed to ${result.inspect()}"
     state.remove("requestedChange")
     state.remove("lastLockCodeChange")
-    state.remove("$name".toString())
     result
 }
 
