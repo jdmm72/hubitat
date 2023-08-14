@@ -54,7 +54,7 @@ metadata {
 
         command "setAlarmMode", [[name: "Alarm Mode", type: "ENUM", description: "", constraints: ["Off", "Alert", "Tamper", "Kick"]]]
         command "setAlarmSensitivity", [[name: "Alarm Sensitivity", type: "ENUM", description: "", constraints: [1, 2, 3, 4, 5]]]
-        command "setBeeperMode"
+        command "setBeeperMode", [[name: "Beeper Mode", type: "ENUM", description: "", constraints: ["On", "Off"]]]
     }
 
     preferences {
@@ -153,8 +153,8 @@ def refresh() {
 }
 
 def lock() {
-    String descriptionText = "${device.displayName} was locked"
-    if (txtEnable) log.info "${descriptionText}"
+    String descriptionText = "${device.displayName} was commanded to lock"
+    if (logEnable) log.info "${descriptionText}"
     lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_SECURED)
 }
 
@@ -162,8 +162,8 @@ def lock() {
  * Executes unlock command on a lock
  */
 def unlock() {
-    String descriptionText = "${device.displayName} was unlocked"
-    if (txtEnable) log.info "${descriptionText}"
+    String descriptionText = "${device.displayName} was commanded to unlock"
+    if (logEnable) log.info "${descriptionText}"
     lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_UNSECURED)
 }
 
@@ -250,6 +250,7 @@ def zwaveEvent(DoorLockOperationReport cmd) {
             result << response(secure(zwave.associationV1.associationGet(groupingIdentifier: 1)))
         }
     }
+    if(txtEnable) log.info("${device.displayName} was ${map.descriptionText}")
     return result ? [createEvent(map), *result] : createEvent(map)
 }
 
@@ -267,8 +268,8 @@ def zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) {
         map.value = 1
         map.descriptionText = "Has a low battery"
     } else {
+        map.name = "batteryLevel"
         map.value = cmd.batteryLevel
-        batteryLevel = cmd.batteryLevel
         map.descriptionText = "Battery is at ${cmd.batteryLevel}%"
     }
     createEvent(map)
@@ -335,22 +336,22 @@ def zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) {
             // when getting the alarm mode, also query the sensitivity for that current alarm mode
             switch (cmd.configurationValue[0]) {
                 case 0x00:
-                    map.value = "Off_alarmMode"
+                    map.value = "Off"
                     break
                 case 0x01:
-                    map.value = "Alert_alarmMode"
+                    map.value = "Alert"
                     result << response(secure(zwave.configurationV2.configurationGet(parameterNumber: 0x08)))
                     break
                 case 0x02:
-                    map.value = "Tamper_alarmMode"
+                    map.value = "Tamper"
                     result << response(secure(zwave.configurationV2.configurationGet(parameterNumber: 0x09)))
                     break
                 case 0x03:
-                    map.value = "Kick_alarmMode"
+                    map.value = "Kick"
                     result << response(secure(zwave.configurationV2.configurationGet(parameterNumber: 0x0A)))
                     break
                 default:
-                    map.value = "unknown_alarmMode"
+                    map.value = "unknown"
             }
             map.descriptionText = "$device.displayName Alarm Mode set to \"$map.value\""
             break
@@ -379,7 +380,7 @@ def zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) {
 
             map = [descriptionText: "$device.displayName Alarm $whichMode Sensitivity set to $val", displayed: true]
 
-            if (curAlarmMode == "${whichMode}_alarmMode") {
+            if (curAlarmMode == "${whichMode}") {
                 map.name = "alarmSensitivity"
                 map.value = modifiedValue
             } else {
@@ -457,7 +458,7 @@ def parseBinaryConfigRpt(paramName, paramValue, paramDesc) {
     if (paramValue == 0) {
         newVal = "off"
     }
-    map.value = "${newVal}_${paramName}"
+    map.value = "${newVal}"
     map.descriptionText = "$device.displayName $paramDesc has been turned $newVal"
     return map
 }
@@ -510,7 +511,7 @@ def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
                 map = [name: "lock", value: "unknown", descriptionText: "$device.displayName is jammed", eventType: "ALERT", displayed: true]
                 break
             case 0xC:
-                map = [name: "codeChanged", value: "all", descriptionText: "$device.displayName: all user codes deleted", displayed: true, isStateChange: true]
+                map = [name: "lastLockCodeChange", value: "all", descriptionText: "$device.displayName: all user codes deleted", displayed: true, isStateChange: true]
                 allCodesDeleted()
                 break
             case 0xD:
@@ -518,13 +519,14 @@ def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
                     map = [name: "codeReport", value: cmd.eventParameter[0], data: [code: ""], isStateChange: true]
                     map.descriptionText = "$device.displayName code ${map.value} was deleted"
                     map.isStateChange = (state["code$map.value"] != "")
-                    state["code$map.value"] = ""
+                    state.remove("code$map.value".toString())
+                    //state["code$map.value"] = ""
                 } else {
-                    map = [name: "codeChanged", descriptionText: "$device.displayName: user code deleted", isStateChange: true]
+                    map = [name: "lastLockCodeChange", descriptionText: "$device.displayName: user code deleted", isStateChange: true]
                 }
                 break
             case 0xE:
-                map = [name: "codeChanged", value: cmd.alarmLevel, descriptionText: "$device.displayName: user code added", isStateChange: true]
+                map = [name: "lastLockCodeChange", value: cmd.alarmLevel, descriptionText: "$device.displayName: user code added", isStateChange: true]
                 if (cmd.eventParameter) {
                     map.value = cmd.eventParameter[0]
                     result << response(requestCode(cmd.eventParameter[0]))
@@ -533,7 +535,7 @@ def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
             case 0xF:
                 map = [name: "tamper", value: "detected", descriptionText: "$device.displayName: Too many user code failures.", eventType: "ALERT", displayed: true, isStateChange: true]
                 break
-                // map = [ name: "codeChanged", descriptionText: "$device.displayName: user code not added, duplicate", isStateChange: true ]
+                // map = [ name: "lastLockCodeChange", descriptionText: "$device.displayName: user code not added, duplicate", isStateChange: true ]
                 // break
             case 0x10:
                 map = [name: "tamper", value: "detected", descriptionText: "$device.displayName: keypad temporarily disabled", displayed: true]
@@ -542,7 +544,7 @@ def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
                 map = [descriptionText: "$device.displayName: keypad is busy"]
                 break
             case 0x12:
-                map = [name: "codeChanged", descriptionText: "$device.displayName: program code changed", isStateChange: true]
+                map = [name: "lastLockCodeChange", descriptionText: "$device.displayName: program code changed", isStateChange: true]
                 break
             case 0x13:
                 map = [name: "tamper", value: "detected", descriptionText: "$device.displayName: code entry attempt limit exceeded", displayed: true]
@@ -581,27 +583,28 @@ def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
                 map = [name: "lock", value: "unknown", descriptionText: "$device.displayName bolt is jammed"]
                 break
             case 13:
-                map = [name: "codeChanged", value: cmd.alarmLevel, descriptionText: "$device.displayName code $cmd.alarmLevel was added", isStateChange: true]
+                map = [name: "lastLockCodeChange", value: cmd.alarmLevel, descriptionText: "$device.displayName code $cmd.alarmLevel was added", isStateChange: true]
                 result << response(requestCode(cmd.alarmLevel))
                 break
             case 32:
-                map = [name: "codeChanged", value: "all", descriptionText: "$device.displayName: all user codes deleted", isStateChange: true]
+                map = [name: "lastLockCodeChange", value: "all", descriptionText: "$device.displayName: all user codes deleted", isStateChange: true]
                 allCodesDeleted()
             case 33:
                 map = [name: "codeReport", value: cmd.alarmLevel, data: [code: ""], isStateChange: true]
                 map.descriptionText = "$device.displayName code $cmd.alarmLevel was deleted"
                 map.isStateChange = (state["code$cmd.alarmLevel"] != "")
-                state["code$cmd.alarmLevel"] = ""
+                state.remove("code$map.value".toString())
+                //state["code$cmd.alarmLevel"] = ""
                 break
             case 112:
-                map = [name: "codeChanged", value: cmd.alarmLevel, descriptionText: "$device.displayName code $cmd.alarmLevel changed", isStateChange: true]
+                map = [name: "lastLockCodeChange", value: cmd.alarmLevel, descriptionText: "$device.displayName code $cmd.alarmLevel changed", isStateChange: true]
                 result << response(requestCode(cmd.alarmLevel))
                 break
             case 130:  // Yale YRD batteries replaced
                 map = [descriptionText: "$device.displayName batteries replaced", isStateChange: true]
                 break
             case 131:
-                map = [ /*name: "codeChanged", value: cmd.alarmLevel,*/ descriptionText: "$device.displayName code $cmd.alarmLevel is duplicate", isStateChange: false]
+                map = [ /*name: "lastLockCodeChange", value: cmd.alarmLevel,*/ descriptionText: "$device.displayName code $cmd.alarmLevel is duplicate", isStateChange: false]
                 break
             case 161:
                 if (cmd.alarmLevel == 2) {
@@ -611,12 +614,7 @@ def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
                 }
                 break
             case 167:
-                if (!state.lastbatt || (new Date().time) - state.lastbatt > TWELVE_HOURS_IN_MILLIS) {
-                    map = [descriptionText: "$device.displayName: battery low", isStateChange: true]
-                    result << response(secure(zwave.batteryV1.batteryGet()))
-                } else {
-                    map = [name: "battery", value: device.currentValue("battery"), descriptionText: "$device.displayName: battery low", displayed: true]
-                }
+                map = [name: "battery", value: device.currentValue("battery"), descriptionText: "$device.displayName: battery low", displayed: true]
                 break
             case 168:
                 map = [name: "battery", value: 1, descriptionText: "$device.displayName: battery level critical", displayed: true]
@@ -632,6 +630,7 @@ def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
 }
 
 def zwaveEvent(UserCodeReport cmd) {
+    def blankCodes = false
     def result = []
     def name = "code$cmd.userIdentifier"
     def code = cmd.userCode
@@ -639,12 +638,12 @@ def zwaveEvent(UserCodeReport cmd) {
     if (cmd.userIdStatus == UserCodeReport.USER_ID_STATUS_OCCUPIED ||
             (cmd.userIdStatus == UserCodeReport.USER_ID_STATUS_STATUS_NOT_AVAILABLE)) {
         if (code == "**********") {  // Schlage locks send us this instead of the real code
-            state.blankcodes = true
+            blankCodes = true
             code = state["set$name"] ?: decrypt(state[name]) ?: code
             state.remove("set$name".toString())
         }
         if (!code && cmd.userIdStatus == 1) {  // Schlage touchscreen sends blank code to notify of a changed code
-            map = [name: "codeChanged", value: cmd.userIdentifier, displayed: true, isStateChange: true]
+            map = [name: "lastLockCodeChange", value: cmd.userIdentifier, displayed: true, isStateChange: true]
             map.descriptionText = "$device.displayName code $cmd.userIdentifier " + (state[name] ? "changed" : "was added")
             code = state["set$name"] ?: decrypt(state[name]) ?: "****"
             state.remove("set$name".toString())
@@ -658,7 +657,7 @@ def zwaveEvent(UserCodeReport cmd) {
         result << createEvent(map)
     } else {
         map = [name: "codeReport", value: cmd.userIdentifier, data: [code: ""]]
-        if (state.blankcodes && state["reset$name"]) {
+        if (blankCodes && state["reset$name"]) {
             // we deleted this code so we can tell that our new code gets set
             map.descriptionText = "$device.displayName code $cmd.userIdentifier was reset"
             map.displayed = map.isStateChange = false
@@ -700,50 +699,28 @@ def zwaveEvent(UserCodeReport cmd) {
         }
     }
     log.debug "code report parsed to ${result.inspect()}"
-    state.remove("blankcodes")
     state.remove("requestedChange")
-    state.remove("codeChanged")
+    state.remove("lastLockCodeChange")
+    state.remove("$name".toString())
     result
 }
 
 
 def zwaveEvent(UsersNumberReport cmd) {
     def result = []
-    state.codes = cmd.supportedUsers
+    // state.codes = cmd.supportedUsers
     if (state.requestCode && state.requestCode <= cmd.supportedUsers) {
         result << response(requestCode(state.requestCode))
     }
     result
 }
 
-// all the on/off parameters work the same way, so make a common method
-// to deal with them
-//
-def setOnOffParameter(paramName, paramNumber) {
-    def cmds = null
-    def cs = device.currentValue(paramName)
-
-    // change parameter to the 'unknown' value - it will get refreshed after it is done changing
-    sendEvent(name: paramName, value: "unknown_${paramName}", displayed: false)
-
-    if (cs == "on_${paramName}") {
-        // turn it off
-        cmds = secureSequence([zwave.configurationV2.configurationSet(parameterNumber: paramNumber, size: 1, configurationValue: [0])], 5000)
-    } else if (cs == "off_${paramName}") {
-        // turn it on
-        cmds = secureSequence([zwave.configurationV2.configurationSet(parameterNumber: paramNumber, size: 1, configurationValue: [0xFF])], 5000)
-    } else {
-        // it's in an unknown state, so just query it
-        cmds = secureSequence([zwave.configurationV2.configurationGet(parameterNumber: paramNumber)], 5000)
-    }
-
-    log.debug "set $paramName sending ${cmds.inspect()}"
-
+def setBeeperMode(def newValue = null) {
+    def beeperParameterNumber = 0x3
+    def newBeeperMode = newValue != null && newValue == "On" ? 0xFF : 0x0
+    def cmds = secureSequence([zwave.configurationV2.configurationSet(parameterNumber: beeperParameterNumber, size: 1, configurationValue: [newBeeperMode])], 5000)
+    log.debug "set BeeperMode sending ${cmds.inspect()}"
     cmds
-}
-
-def setBeeperMode() {
-    setOnOffParameter("beeperMode", 0x3)
 }
 
 def setAlarmMode(def newValue = null) {
@@ -815,20 +792,20 @@ def setAlarmSensitivity(newValue) {
         def paramToSet = 0
 
         switch (cs) {
-            case "Off_alarmMode":
+            case "Off":
                 // do nothing.	the slider should be disabled anyway
                 break
-            case "Alert_alarmMode":
+            case "Alert":
                 // set param 8
                 paramToSet = 0x8
                 break
-            case "Tamper_alarmMode":
+            case "Tamper":
                 paramToSet = 0x9
                 break
-            case "Kick_alarmMode":
+            case "Kick":
                 paramToSet = 0xA
                 break
-            case "unknown_alarmMode":
+            case "unknown":
             default:
                 sendEvent(descriptionText: "$device.displayName unable to set alarm sensitivity while alarm mode in unknown state", displayed: true, isStateChange: true)
                 break
