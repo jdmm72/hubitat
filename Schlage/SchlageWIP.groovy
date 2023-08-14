@@ -266,11 +266,10 @@ def zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) {
         map.value = 1
         map.descriptionText = "Has a low battery"
     } else {
+        map.name = "batteryLevel"
         map.value = cmd.batteryLevel
-        batteryLevel = cmd.batteryLevel
         map.descriptionText = "Battery is at ${cmd.batteryLevel}%"
     }
-    state["batteryLevel"] = cmd.batteryLevel
     createEvent(map)
 }
 
