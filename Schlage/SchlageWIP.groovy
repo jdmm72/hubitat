@@ -80,8 +80,7 @@ def configure() {
     cmds << secure(zwave.doorLockV1.doorLockOperationGet())
     cmds << secure(zwave.batteryV1.batteryGet())
     cmds = delayBetween(cmds, THIRTY_SECONDS_IN_MILLIS)
-    String descriptionText = "${device.displayName} was configured"
-    if (txtEnable) log.info "${descriptionText}"
+    if (txtEnable) log.info "${device.displayName} was configured"
     cmds
 }
 
@@ -101,8 +100,9 @@ def scheduleInstalledCheck() {
 
 void updated() {
     log.info "updated..."
-    log.warn "description logging is: ${txtEnable == true}"
-    log.warn "encryption is: ${optEncrypt == true}"
+    log.warn "description logging is: ${txtEnable}"
+    log.warn "debug logging is: ${logEnable}"
+    log.warn "encryption is: ${optEncrypt}"
     //check crnt lockCodes for encryption status
     updateEncryption()
     //turn off debug logs after 30 minutes
@@ -520,7 +520,6 @@ def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
                     map.descriptionText = "$device.displayName code ${map.value} was deleted"
                     map.isStateChange = (state["code$map.value"] != "")
                     state.remove("code$map.value".toString())
-                    //state["code$map.value"] = ""
                 } else {
                     map = [name: "lastLockCodeChange", descriptionText: "$device.displayName: user code deleted", isStateChange: true]
                 }
@@ -535,8 +534,6 @@ def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
             case 0xF:
                 map = [name: "tamper", value: "detected", descriptionText: "$device.displayName: Too many user code failures.", eventType: "ALERT", displayed: true, isStateChange: true]
                 break
-                // map = [ name: "lastLockCodeChange", descriptionText: "$device.displayName: user code not added, duplicate", isStateChange: true ]
-                // break
             case 0x10:
                 map = [name: "tamper", value: "detected", descriptionText: "$device.displayName: keypad temporarily disabled", displayed: true]
                 break
@@ -637,11 +634,6 @@ def zwaveEvent(UserCodeReport cmd) {
     def map = [:]
     if (cmd.userIdStatus == UserCodeReport.USER_ID_STATUS_OCCUPIED ||
             (cmd.userIdStatus == UserCodeReport.USER_ID_STATUS_STATUS_NOT_AVAILABLE)) {
-        if (code == "**********") {  // Schlage locks send us this instead of the real code
-            blankCodes = true
-            code = state["set$name"] ?: decrypt(state[name]) ?: code
-            state.remove("set$name".toString())
-        }
         if (!code && cmd.userIdStatus == 1) {  // Schlage touchscreen sends blank code to notify of a changed code
             map = [name: "lastLockCodeChange", value: cmd.userIdentifier, displayed: true, isStateChange: true]
             map.descriptionText = "$device.displayName code $cmd.userIdentifier " + (state[name] ? "changed" : "was added")
@@ -652,9 +644,11 @@ def zwaveEvent(UserCodeReport cmd) {
             map.descriptionText = "$device.displayName code $cmd.userIdentifier is set"
             map.displayed = (cmd.userIdentifier != state.requestCode && cmd.userIdentifier != state.pollCode)
             map.isStateChange = true
-            updateLockCodes(getLockCodes())
+            updateLockCodes(lockCodes)
         }
         result << createEvent(map)
+        state.remove("name".toString())
+        code = ""
     } else {
         map = [name: "codeReport", value: cmd.userIdentifier, data: [code: ""]]
         if (blankCodes && state["reset$name"]) {
@@ -666,12 +660,12 @@ def zwaveEvent(UserCodeReport cmd) {
             result << response(setCode(cmd.userIdentifier, state["reset$name"]))
             state.remove("reset$name".toString())
         } else {
-            if (state[name]) {
+            if (getCodeMap(lockCodes, cmd.userIdentifier).size() > 0) {
                 updateLockCodes(state.requestedChange)
                 state.requestedChange = null
                 Map data = ["${codeNumber}": codeMap]
                 map.descriptionText = "$device.displayName code $cmd.userIdentifier was deleted"
-
+                state.remove("$name".toString())
             } else {
                 map.descriptionText = "$device.displayName code $cmd.userIdentifier is not set"
             }
@@ -681,7 +675,11 @@ def zwaveEvent(UserCodeReport cmd) {
         }
         code = ""
     }
-    state[name] = code ? encrypt(code) : code
+    if(code != null && code.toString() != "") {
+        state[name] = code ? encrypt(code) : code
+    } else {
+        state.remove("name".toString())
+    }
 
     if (cmd.userIdentifier == state.requestCode) {  // reloadCodes() was called, keep requesting the codes in order
         if (state.requestCode + 1 > state.codes || state.requestCode >= 30) {
@@ -701,14 +699,12 @@ def zwaveEvent(UserCodeReport cmd) {
     log.debug "code report parsed to ${result.inspect()}"
     state.remove("requestedChange")
     state.remove("lastLockCodeChange")
-    state.remove("$name".toString())
     result
 }
 
 
 def zwaveEvent(UsersNumberReport cmd) {
     def result = []
-    // state.codes = cmd.supportedUsers
     if (state.requestCode && state.requestCode <= cmd.supportedUsers) {
         result << response(requestCode(state.requestCode))
     }
@@ -837,7 +833,7 @@ def setCodeLength(newValue) {
 }
 
 def getCodes() {
-    Map codeMap = getLockCodes()
+    Map codeMap = lockCodes
     log.debug "codeMap: $codeMap"
     codeMap
 }
@@ -849,7 +845,7 @@ def setCode(codeNumber, code, name) {
 
     if (!name) name = "code #${codeNumber}"
 
-    lockCodes = getLockCodes()
+    lockCodes = lockCodes
     Map codeMap = getCodeMap(lockCodes, codeNumber)
     if (!changeIsValid(lockCodes, codeMap, codeNumber, code, name)) return
 
