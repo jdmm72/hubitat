@@ -1,0 +1,70 @@
+/*
+* Http weather sensor
+*
+* Calls URIs with HTTP GET for weather data as a sensor
+*
+*/
+import groovy.json.JsonSlurper
+
+metadata {
+    definition(name: "Http weather sensor", namespace: "org.mynhier", author: "jmynhier") {
+        capability "Sensor"
+        capability "Refresh"
+        capability "Temperature Measurement"
+    }
+}
+
+preferences {
+    section("URIs") {
+        input "refreshURI", "text", title: "Refresh URI", defaultValue: "https://api.weather.gov/stations/KRDU/observations/latest"
+        input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
+    }
+}
+
+
+
+def logsOff() {
+    log.warn "debug logging disabled..."
+    device.updateSetting("logEnable", [value: "false", type: "bool"])
+}
+
+def updated() {
+    log.info "updated..."
+    log.warn "debug logging is: ${logEnable == true}"
+    if (logEnable) runIn(1800, logsOff)
+}
+
+def parse(String description) {
+    if (logEnable) log.debug(description)
+}
+
+def refresh() {
+    def requestParams = [
+            uri: settings.refreshURI,
+            requestContentType: "application/json",
+            contentType: "application/json"
+    ]
+
+    if (logEnable) log.debug "Sending GET request to [${settings.refreshURI}]"
+    log.debug "$requestParams"
+    asynchttpGet(asyncHandler, requestParams)
+}
+
+def asyncHandler(resp, data) {
+    def temperature
+    if(resp.getStatus() == 200 || resp.getStatus() == 207) {
+        temperature = celsiusToFahrenheit(resp.json.properties.temperature.value)
+    } else {
+        log.error "Call to refresh failed: $resp"
+    }
+    getTemperatureResult(temperature)
+}
+
+private getTemperatureResult(temperatureInF){
+    log.debug "temp in getTemperatureResult: $temperatureInF"
+    def name = "temperature"
+    def unit = "°${location.temperatureScale}"
+    def descriptionText = "${device.displayName} ${name} is ${temperatureInF}${unit}"
+    log.info "${descriptionText}"
+    sendEvent(name: name,value: temperatureInF,descriptionText: descriptionText,unit: unit)
+}
