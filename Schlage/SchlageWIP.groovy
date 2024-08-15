@@ -59,8 +59,8 @@ metadata {
 
     preferences {
         input name: "optEncrypt", type: "bool", title: "Enable lockCode encryption", defaultValue: false, description: ""
-        input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false, description: ""
-        input name: "txtEnable", type: "bool", title: "Enable descriptionText logging", defaultValue: true, description: ""
+        input name: "debugLoggingEnabled", type: "bool", title: "Enable debug logging", defaultValue: false, description: ""
+        input name: "descTxtLoggingEnabled", type: "bool", title: "Enable descriptionText logging", defaultValue: true, description: ""
     }
 }
 
@@ -80,7 +80,7 @@ def configure() {
     cmds << secure(zwave.doorLockV1.doorLockOperationGet())
     cmds << secure(zwave.batteryV1.batteryGet())
     cmds = delayBetween(cmds, THIRTY_SECONDS_IN_MILLIS)
-    if (txtEnable) log.info "${device.displayName} was configured"
+    if (descTxtLoggingEnabled) log.info "${device.displayName} was configured"
     cmds
 }
 
@@ -100,13 +100,13 @@ def scheduleInstalledCheck() {
 
 void updated() {
     log.info "updated..."
-    log.warn "description logging is: ${txtEnable}"
-    log.warn "debug logging is: ${logEnable}"
+    log.warn "description logging is: ${descTxtLoggingEnabled}"
+    log.warn "debug logging is: ${debugLoggingEnabled}"
     log.warn "encryption is: ${optEncrypt}"
     //check crnt lockCodes for encryption status
     updateEncryption()
     //turn off debug logs after 30 minutes
-    if (logEnable) runIn(ONE_HALF_HOUR_IN_SECONDS, logsOff)
+    if (debugLoggingEnabled) runIn(ONE_HALF_HOUR_IN_SECONDS, logsOff)
 }
 
 /**
@@ -118,6 +118,7 @@ void updated() {
  *
  */
 def parse(String description) {
+    if (debugLoggingEnabled) log.debug "Parsing a message"
     def result = null
     if (description.startsWith("Err")) {
         result = createEvent(descriptionText: description, isStateChange: true, displayed: false)
@@ -153,8 +154,9 @@ def refresh() {
 }
 
 def lock() {
+    if (debugLoggingEnabled) log.debug "Sending Lock Command"
     String descriptionText = "${device.displayName} was commanded to lock"
-    if (logEnable) log.info "${descriptionText}"
+    if (debugLoggingEnabled) log.debug "${descriptionText}"
     lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_SECURED)
 }
 
@@ -162,8 +164,9 @@ def lock() {
  * Executes unlock command on a lock
  */
 def unlock() {
+    if (debugLoggingEnabled) log.debug "Sending Unlock Command"
     String descriptionText = "${device.displayName} was commanded to unlock"
-    if (logEnable) log.info "${descriptionText}"
+    if (debugLoggingEnabled) log.debug "${descriptionText}"
     lockAndCheck(DoorLockOperationSet.DOOR_LOCK_MODE_DOOR_UNSECURED)
 }
 
@@ -171,6 +174,7 @@ def unlock() {
  * Executes lock and then check command with a delay on a lock
  */
 def lockAndCheck(doorLockMode) {
+    if (debugLoggingEnabled) log.debug "Sending a LockAndCheck Command"
     secureSequence([
             zwave.doorLockV1.doorLockOperationSet(doorLockMode: doorLockMode),
             zwave.doorLockV1.doorLockOperationGet()
@@ -185,6 +189,7 @@ def lockAndCheck(doorLockMode) {
  * @returns ret: The encapsulated command
  */
 private secure(hubitat.zwave.Command cmd) {
+    if (debugLoggingEnabled) log.debug "Encapsulating a command."
     zwave.securityV1.securityMessageEncapsulation().encapsulate(cmd).format()
 }
 
@@ -198,6 +203,7 @@ private secure(hubitat.zwave.Command cmd) {
  * @returns The encapsulated commands
  */
 private secureSequence(commands, delay = 4200) {
+    if (debugLoggingEnabled) log.debug "Encapsulating a list of commands"
     delayBetween(commands.collect { secure(it) }, delay)
 }
 
@@ -210,6 +216,7 @@ private secureSequence(commands, delay = 4200) {
  *
  */
 def zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
+    if (debugLoggingEnabled) log.debug "Received a secure message event"
     def encapsulatedCommand = cmd.encapsulatedCommand([0x62: 1, 0x71: 2, 0x80: 1, 0x85: 2, 0x63: 1, 0x98: 1, 0x86: 1])
     if (encapsulatedCommand) {
         zwaveEvent(encapsulatedCommand)
@@ -225,6 +232,7 @@ def zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cm
  *
  */
 def zwaveEvent(DoorLockOperationReport cmd) {
+    if (debugLoggingEnabled) log.debug "Received a lock operation report"
     def result = []
 
     unschedule("followupStateCheck")
@@ -235,12 +243,15 @@ def zwaveEvent(DoorLockOperationReport cmd) {
     if (cmd.doorLockMode == 0xFF) {
         map.value = "locked"
         map.descriptionText = "Locked"
+        if (debugLoggingEnabled) log.debug "Received Lock Operation Report: Locked"
     } else if (cmd.doorLockMode >= 0x40) {
         map.value = "unknown"
         map.descriptionText = "Unknown state"
+        if (debugLoggingEnabled) log.debug "Received Lock Operation Report: Unknown"
     } else if (cmd.doorLockMode == 0x01) {
         map.value = "unlocked with timeout"
         map.descriptionText = "Unlocked with timeout"
+        if (debugLoggingEnabled) log.debug "Received Lock Operation Report: Unlocked with timeout"
     } else {
         map.value = "unlocked"
         map.descriptionText = "Unlocked"
@@ -249,8 +260,9 @@ def zwaveEvent(DoorLockOperationReport cmd) {
             result << response(zwave.associationV1.associationSet(groupingIdentifier: 2, nodeId: zwaveHubNodeId))
             result << response(secure(zwave.associationV1.associationGet(groupingIdentifier: 1)))
         }
+        if (debugLoggingEnabled) log.debug "Received Lock Operation Report: Unlocked"
     }
-    if(txtEnable) log.info("${device.displayName} was ${map.descriptionText}")
+    if(descTxtLoggingEnabled) log.info("${device.displayName} was ${map.descriptionText}")
     return result ? [createEvent(map), *result] : createEvent(map)
 }
 
@@ -267,10 +279,12 @@ def zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) {
     if (cmd.batteryLevel == 0xFF) {
         map.value = 1
         map.descriptionText = "Has a low battery"
+        if (debugLoggingEnabled) log.debug "Received Battery Report: Low Battery"
     } else {
         map.name = "batteryLevel"
         map.value = cmd.batteryLevel
         map.descriptionText = "Battery is at ${cmd.batteryLevel}%"
+        if (debugLoggingEnabled) log.debug "Received Battery Report: ${map.descriptionText}"
     }
     createEvent(map)
 }
@@ -384,7 +398,7 @@ def zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) {
                 map.name = "alarmSensitivity"
                 map.value = modifiedValue
             } else {
-                log.debug "got sensitivity for $whichMode while in $curAlarmMode"
+                if (debugLoggingEnabled) log.debug "got sensitivity for $whichMode while in $curAlarmMode"
                 map.isStateChange = true
             }
 
@@ -448,6 +462,7 @@ def zwaveEvent(hubitat.zwave.commands.configurationv2.ConfigurationReport cmd) {
         // generic description text
         result << createEvent([descriptionText: "$device.displayName reports \"$desc\" configured as \"$val\"", displayed: true, isStateChange: true])
     }
+    if(descTxtLoggingEnabled) log.info("${device.displayName} was ${map.descriptionText}")
     result
 }
 
@@ -623,6 +638,7 @@ def zwaveEvent(hubitat.zwave.commands.alarmv2.AlarmReport cmd) {
                 map = [displayed: false, descriptionText: "$device.displayName: alarm event $cmd.alarmType level $cmd.alarmLevel"]
                 break
         }
+    if(descTxtLoggingEnabled) log.info("${device.displayName} was ${map.descriptionText}")
     result ? [createEvent(map), *result] : createEvent(map)
 }
 
@@ -696,7 +712,7 @@ def zwaveEvent(UserCodeReport cmd) {
             state.pollCode = state.pollCode + 1
         }
     }
-    log.debug "code report parsed to ${result.inspect()}"
+    if (debugLoggingEnabled) log.debug "code report parsed to ${result.inspect()}"
     state.remove("requestedChange")
     state.remove("lastLockCodeChange")
     result
@@ -715,7 +731,7 @@ def setBeeperMode(def newValue = null) {
     def beeperParameterNumber = 0x3
     def newBeeperMode = newValue != null && newValue == "On" ? 0xFF : 0x0
     def cmds = secureSequence([zwave.configurationV2.configurationSet(parameterNumber: beeperParameterNumber, size: 1, configurationValue: [newBeeperMode])], 5000)
-    log.debug "set BeeperMode sending ${cmds.inspect()}"
+    if (debugLoggingEnabled) log.debug "set BeeperMode sending ${cmds.inspect()}"
     cmds
 }
 
@@ -772,7 +788,7 @@ def setAlarmMode(def newValue = null) {
         cmds = secureSequence([zwave.configurationV2.configurationSet(parameterNumber: 7, size: 1, configurationValue: [newMode])], 5000)
     }
 
-    log.debug "setAlarmMode sending ${cmds.inspect()}"
+    if (debugLoggingEnabled) log.debug "setAlarmMode sending ${cmds.inspect()}"
     cmds
 }
 
@@ -811,7 +827,7 @@ def setAlarmSensitivity(newValue) {
             sendEvent(name: 'alarmSensitivity', value: 0, displayed: false)
             // then add the actual attribute set call
             cmds = secureSequence([zwave.configurationV2.configurationSet(parameterNumber: paramToSet, size: 1, configurationValue: [newValue])], 5000)
-            log.debug "setAlarmSensitivity sending ${cmds.inspect()}"
+            if (debugLoggingEnabled) log.debug "setAlarmSensitivity sending ${cmds.inspect()}"
         }
     }
     cmds
@@ -828,20 +844,20 @@ def setCodeLength(newValue) {
     } else {
         sendEvent(descriptionText: "$device.displayName UNABLE to set PIN length of $newValue", displayed: true, isStateChange: true)
     }
-    log.debug "setPinLength sending ${cmds}"
+    if (debugLoggingEnabled) log.debug "setPinLength sending ${cmds}"
     cmds
 }
 
 def getCodes() {
     Map codeMap = lockCodes
-    log.debug "codeMap: $codeMap"
+    if (debugLoggingEnabled) log.debug "codeMap: $codeMap"
     codeMap
 }
 
 def setCode(codeNumber, code, name) {
     if (codeNumber == null || codeNumber == 0 || code == null) return
 
-    if (logEnable) log.debug "setCode- ${codeNumber}"
+    if (debugLoggingEnabled) log.debug "setCode- ${codeNumber}"
 
     if (!name) name = "code #${codeNumber}"
 
@@ -944,7 +960,7 @@ Boolean changeIsValid(lockCodes, codeMap, codeNumber, code, name) {
 }
 
 def deleteCode(codeNumber) {
-    log.debug "deleting code $codeNumber"
+    if (debugLoggingEnabled) log.debug "deleting code $codeNumber"
     Map codeMap = getCodeMap(lockCodes, "${codeNumber}")
     if (codeMap) {
         Map result = [:]
@@ -964,7 +980,7 @@ def deleteCode(codeNumber) {
 
 void logsOff() {
     log.warn "debug logging disabled..."
-    device.updateSetting("logEnable", [value: "false", type: "bool"])
+    device.updateSetting("debugLoggingEnabled", [value: "false", type: "bool"])
 }
 
 void updateEncryption() {
