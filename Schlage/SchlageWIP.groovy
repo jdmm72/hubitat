@@ -51,6 +51,8 @@ metadata {
         attribute "alarmSensitivity", "number"    // 0 is unknown, otherwise 1-5 scaled to 1-99
         attribute "beeperMode", "string"
         attribute "batteryLevel", "number"
+        attribute "lastIncomingEvent", "Date"
+        attribute "lastIncomingEventEpoch", "number"
 
         command "setAlarmMode", [[name: "Alarm Mode", type: "ENUM", description: "", constraints: ["Off", "Alert", "Tamper", "Kick"]]]
         command "setAlarmSensitivity", [[name: "Alarm Sensitivity", type: "ENUM", description: "", constraints: [1, 2, 3, 4, 5]]]
@@ -118,6 +120,8 @@ void updated() {
  *
  */
 def parse(String description) {
+    sendEvent(name: 'lastIncomingEventEpoch', value: now(), displayed: true)
+    sendEvent(name: 'lastIncomingEvent', value: new Date().format('yyyy-MM-dd HH:mm:ss'), displayed: true)
     if (debugLoggingEnabled) log.debug "Parsing a message"
     def result = null
     if (description.startsWith("Err")) {
